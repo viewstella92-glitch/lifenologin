@@ -149,6 +149,7 @@ function Dashboard() {
             </div>
             <div className="flex items-center gap-1">
               <Link href="/insights" className="rounded-full bg-pink-100 px-3 py-1 text-xs hover:bg-pink-200">ภาพรวม 📊</Link>
+              <Link href="/movies" className="rounded-full bg-sky-100 px-3 py-1 text-xs hover:bg-sky-200">หนัง 🎬</Link>
             </div>
           </div>
           <div>
