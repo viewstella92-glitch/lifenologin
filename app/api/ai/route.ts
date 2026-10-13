@@ -96,12 +96,13 @@ export async function POST(req: NextRequest) {
     if (h.error || l.error || t.error || m.error) {
       throw new Error('อ่านข้อมูลจากฐานข้อมูลไม่สำเร็จ จึงยังสรุปยอดให้ไม่ได้')
     }
-    const transactions = (t.data ?? []) as { type: string; amount_satang: number; tx_date: string; note: string | null; categories?: { name: string } | null }[]
+    const transactions = (t.data ?? []) as unknown as { type: string; amount_satang: number; tx_date: string; note: string | null; categories?: { name: string } | { name: string }[] | null }[]
     const incomeSatang = transactions.filter(x => x.type === 'income').reduce((sum, x) => sum + Number(x.amount_satang || 0), 0)
     const expenseSatang = transactions.filter(x => x.type === 'expense').reduce((sum, x) => sum + Number(x.amount_satang || 0), 0)
     const categoryTotals: Record<string, number> = {}
     for (const tx of transactions.filter(x => x.type === 'expense')) {
-      const category = tx.categories?.name || 'ไม่ระบุหมวด'
+      const categoryValue = Array.isArray(tx.categories) ? tx.categories[0]?.name : tx.categories?.name
+      const category = categoryValue || 'ไม่ระบุหมวด'
       categoryTotals[category] = (categoryTotals[category] || 0) + Number(tx.amount_satang || 0)
     }
     const exactFinance = {
@@ -110,7 +111,7 @@ export async function POST(req: NextRequest) {
       expense_baht: Number((expenseSatang / 100).toFixed(2)),
       remaining_baht: Number(((incomeSatang - expenseSatang) / 100).toFixed(2)),
       expense_by_category_baht: Object.fromEntries(Object.entries(categoryTotals).sort((a,b) => b[1]-a[1]).map(([k,v]) => [k, Number((v/100).toFixed(2))])),
-      transactions: transactions.map(x => ({ type: x.type, amount_baht: Number((Number(x.amount_satang || 0)/100).toFixed(2)), date: x.tx_date, note: x.note, category: x.categories?.name || 'ไม่ระบุหมวด' }))
+      transactions: transactions.map(x => ({ type: x.type, amount_baht: Number((Number(x.amount_satang || 0)/100).toFixed(2)), date: x.tx_date, note: x.note, category: (Array.isArray(x.categories) ? x.categories[0]?.name : x.categories?.name) || 'ไม่ระบุหมวด' }))
     }
     const data = JSON.stringify({ habits: h.data, habit_logs: l.data, finance_calculated_by_code: exactFinance, moods: m.data })
     const answer = await ai(
