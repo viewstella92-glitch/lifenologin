@@ -67,13 +67,20 @@ export async function POST(req: NextRequest) {
       await sb.from('ai_usage').insert({})
       const p = JSON.parse(out.match(/\{[\s\S]*\}/)?.[0] ?? '{}')
       const amount = Number(p.amount)
-      if (p.error || !(amount > 0)) return NextResponse.json({ error: p.error ?? 'อ่านจำนวนเงินไม่ออก ลองพิมพ์ใหม่นะ' }, { status: 422 })
+      if (p.error || !(amount > 0) || !Number.isFinite(amount) || amount > 100000000) {
+        return NextResponse.json({ error: p.error ?? 'อ่านจำนวนเงินไม่ชัดเจน กรุณาตรวจสอบยอดเงินแล้วลองใหม่' }, { status: 422 })
+      }
+      if (p.type !== 'income' && p.type !== 'expense') {
+        return NextResponse.json({ error: 'AI ยังแยกไม่ชัดว่าเป็นรายรับหรือรายจ่าย กรุณาระบุให้ชัดก่อนบันทึก' }, { status: 422 })
+      }
+      const date = typeof p.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(p.date) ? p.date : body.today
+      if (date > body.today) return NextResponse.json({ error: 'วันที่รายการอยู่ในอนาคต กรุณาตรวจสอบวันที่อีกครั้ง' }, { status: 422 })
       return NextResponse.json({
-        type: p.type === 'income' ? 'income' : 'expense',
+        type: p.type,
         amount,
-        category_id: cats.some((c) => c.id === p.category_id) ? p.category_id : null,
+        category_id: cats.some((c) => c.id === p.category_id && c.type === p.type) ? p.category_id : null,
         note: p.note ? String(p.note).slice(0, 100) : null,
-        date: /^\d{4}-\d{2}-\d{2}$/.test(p.date) ? p.date : body.today,
+        date,
       })
     }
 
@@ -86,9 +93,29 @@ export async function POST(req: NextRequest) {
       sb.from('transactions').select('type,amount_satang,tx_date,note,categories(name)').gte('tx_date', since),
       sb.from('moods').select('mood_date,score').gte('mood_date', since),
     ])
-    const data = JSON.stringify({ habits: h.data, habit_logs: l.data, transactions: t.data, moods: m.data })
+    if (h.error || l.error || t.error || m.error) {
+      throw new Error('อ่านข้อมูลจากฐานข้อมูลไม่สำเร็จ จึงยังสรุปยอดให้ไม่ได้')
+    }
+    const transactions = (t.data ?? []) as { type: string; amount_satang: number; tx_date: string; note: string | null; categories?: { name: string } | null }[]
+    const incomeSatang = transactions.filter(x => x.type === 'income').reduce((sum, x) => sum + Number(x.amount_satang || 0), 0)
+    const expenseSatang = transactions.filter(x => x.type === 'expense').reduce((sum, x) => sum + Number(x.amount_satang || 0), 0)
+    const categoryTotals: Record<string, number> = {}
+    for (const tx of transactions.filter(x => x.type === 'expense')) {
+      const category = tx.categories?.name || 'ไม่ระบุหมวด'
+      categoryTotals[category] = (categoryTotals[category] || 0) + Number(tx.amount_satang || 0)
+    }
+    const exactFinance = {
+      transaction_count: transactions.length,
+      income_baht: Number((incomeSatang / 100).toFixed(2)),
+      expense_baht: Number((expenseSatang / 100).toFixed(2)),
+      remaining_baht: Number(((incomeSatang - expenseSatang) / 100).toFixed(2)),
+      expense_by_category_baht: Object.fromEntries(Object.entries(categoryTotals).sort((a,b) => b[1]-a[1]).map(([k,v]) => [k, Number((v/100).toFixed(2))])),
+      transactions: transactions.map(x => ({ type: x.type, amount_baht: Number((Number(x.amount_satang || 0)/100).toFixed(2)), date: x.tx_date, note: x.note, category: x.categories?.name || 'ไม่ระบุหมวด' }))
+    }
+    const data = JSON.stringify({ habits: h.data, habit_logs: l.data, finance_calculated_by_code: exactFinance, moods: m.data })
     const answer = await ai(
-      'คุณเป็นผู้ช่วยในแอปติดตามชีวิตประจำวัน ตอบเป็นภาษาไทย สั้น กระชับ อบอุ่นและให้กำลังใจ ใช้เฉพาะข้อมูลที่ให้มา ' +
+      'คุณเป็นผู้ช่วยในแอปติดตามชีวิตประจำวัน ตอบเป็นภาษาไทย สั้น ชัดเจน ใช้เฉพาะข้อมูลที่ให้มา ' +
+        'สำคัญมาก: ยอดรายรับ รายจ่าย คงเหลือ และยอดแยกหมวดใน finance_calculated_by_code คำนวณด้วยโค้ดจากฐานข้อมูลแล้ว ให้ใช้ตัวเลขเหล่านี้ตรงตามที่ให้มา ห้ามคำนวณใหม่ ห้ามประมาณ ห้ามสร้างยอดหรือรายการที่ไม่มีอยู่จริง หากไม่มีข้อมูลให้บอกว่าไม่มีข้อมูล ' +
         'amount_satang หาร 100 เป็นบาท mood 1-5 (5 ดีที่สุด) habit_logs คือวันที่ทำ habit สำเร็จ ถ้าข้อมูลไม่พอให้บอกตรงๆ',
       `ข้อมูล ${days} วันล่าสุด: ${data}\n\nคำถาม: ${String(body.question).slice(0, 300)}`,
       600
