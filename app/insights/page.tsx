@@ -119,6 +119,13 @@ export default function Insights() {
   })
   const maxW = Math.max(...weeks, 1)
   const monthTotal = Object.values(spentBy).reduce((s, x) => s + x.total, 0) || 1
+  const monthTxs = txs.filter((t) => t.tx_date >= monthStart && t.tx_date <= today)
+  const monthIncome = monthTxs.filter((t) => t.type === 'income').reduce((s, t) => s + Number(t.amount_satang || 0), 0)
+  const monthExpense = monthTxs.filter((t) => t.type === 'expense').reduce((s, t) => s + Number(t.amount_satang || 0), 0)
+  const prevStart = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return ymd(d) })()
+  const prevEnd = (() => { const d = new Date(); d.setDate(0); return ymd(d) })()
+  const prevExpense = txs.filter(t => t.type === 'expense' && t.tx_date >= prevStart && t.tx_date <= prevEnd).reduce((s,t) => s + Number(t.amount_satang || 0), 0)
+  const expenseDiff = prevExpense > 0 ? Math.round((monthExpense - prevExpense) / prevExpense * 100) : null
   const rate = (id: string) => Math.round((logs.filter((l) => l.habit_id === id && l.log_date >= daysAgo(29)).length / 30) * 100)
 
   return (
@@ -129,6 +136,20 @@ export default function Insights() {
           <Link href="/" className="rounded-full bg-sky-50 px-4 py-1.5 text-sm hover:bg-sky-100">กลับหน้าวันนี้</Link>
         </header>
         {err && <p role="alert" className="rounded-2xl bg-rose-50 p-3 text-sm text-rose-800">{err}</p>}
+
+        <section className={`${card} space-y-4`}>
+          <div className="flex items-start justify-between gap-3">
+            <div><h2 className="text-lg font-semibold">ภาพรวมการเงิน 💸</h2><p className="text-xs text-slate-500">คำนวณจากรายการที่บันทึกจริง · {monthStart} ถึง {today}</p></div>
+            <span className="rounded-full bg-sky-50 px-3 py-1 text-xs text-sky-700">{monthTxs.length} รายการ</span>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-100"><p className="text-sm text-emerald-800">รายรับ</p><p className="mt-1 break-words text-xl font-semibold text-emerald-950">฿{baht(monthIncome)}</p><p className="mt-1 text-xs text-emerald-700">รวมยอดรับเดือนนี้</p></div>
+            <div className="rounded-2xl bg-rose-50 p-4 ring-1 ring-rose-100"><p className="text-sm text-rose-800">รายจ่าย</p><p className="mt-1 break-words text-xl font-semibold text-rose-950">฿{baht(monthExpense)}</p><p className="mt-1 text-xs text-rose-700">{expenseDiff === null ? 'ยังไม่มีข้อมูลเดือนก่อนให้เปรียบเทียบ' : `${expenseDiff > 0 ? 'เพิ่ม' : expenseDiff < 0 ? 'ลด' : 'เท่าเดิม'} ${Math.abs(expenseDiff)}% จากเดือนก่อน`}</p></div>
+            <div className={`rounded-2xl p-4 ring-1 ${monthIncome - monthExpense >= 0 ? 'bg-sky-50 ring-sky-100' : 'bg-amber-50 ring-amber-100'}`}><p className="text-sm text-slate-700">เงินคงเหลือสุทธิ</p><p className="mt-1 break-words text-xl font-semibold text-slate-900">฿{baht(monthIncome - monthExpense)}</p><p className="mt-1 text-xs text-slate-600">{monthIncome > 0 ? `ใช้ไป ${Math.round(monthExpense / monthIncome * 100)}% ของรายรับ` : 'เพิ่มรายการรายรับเพื่อดูสัดส่วนการใช้จ่าย'}</p></div>
+          </div>
+          <div><div className="mb-2 flex justify-between text-xs text-slate-500"><span>รายรับ</span><span>รายจ่าย</span></div><div className="flex h-3 overflow-hidden rounded-full bg-slate-100" aria-label="เปรียบเทียบรายรับกับรายจ่าย"><div className="bg-emerald-300 transition-all" style={{ width: `${monthIncome + monthExpense ? monthIncome / (monthIncome + monthExpense) * 100 : 0}%` }} /><div className="bg-rose-300 transition-all" style={{ width: `${monthIncome + monthExpense ? monthExpense / (monthIncome + monthExpense) * 100 : 0}%` }} /></div></div>
+          <p className="text-xs leading-relaxed text-slate-500">ยอดในส่วนนี้รวมจากฐานข้อมูลโดยตรง ไม่ให้ AI เดาตัวเลข หากรายการตกหล่น ให้ตรวจสอบวันที่และรายการที่บันทึกไว้</p>
+        </section>
 
         {aiOn && (
         <section className={`${card} space-y-3`}>
