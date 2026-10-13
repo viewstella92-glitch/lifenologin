@@ -57,6 +57,7 @@ export default function Home() {
 function Dashboard() {
   const today = ymd(new Date())
   const monthStart = today.slice(0, 8) + '01'
+  const prevMonthStart = (() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return ymd(d) })()
 
   const [habits, setHabits] = useState<Habit[]>([])
   const [logs, setLogs] = useState<Log[]>([])
@@ -69,6 +70,7 @@ function Dashboard() {
   const [amount, setAmount] = useState('')
   const [catId, setCatId] = useState('')
   const [note, setNote] = useState('')
+  const [txFilter, setTxFilter] = useState<'all' | Kind>('all')
 
   const load = useCallback(async () => {
     const since = new Date()
@@ -80,7 +82,8 @@ function Dashboard() {
       supabase
         .from('transactions')
         .select('id,type,amount_satang,tx_date,note,categories(name,emoji)')
-        .gte('tx_date', monthStart)
+        .gte('tx_date', prevMonthStart)
+        .lte('tx_date', today)
         .order('tx_date', { ascending: false })
         .order('created_at', { ascending: false }),
     ])
@@ -91,7 +94,7 @@ function Dashboard() {
     setLogs(l.data as Log[])
     setCats(c.data as Cat[])
     setTxs(t.data as unknown as Tx[])
-  }, [monthStart])
+  }, [prevMonthStart, today])
 
   useEffect(() => {
     load()
@@ -130,9 +133,20 @@ function Dashboard() {
     load()
   }
 
-  const sum = (k: Kind) => txs.filter((t) => t.type === k).reduce((s, t) => s + t.amount_satang, 0)
-  const income = sum('income')
-  const expense = sum('expense')
+  const currentTxs = txs.filter((t) => t.tx_date >= monthStart && t.tx_date <= today)
+  const previousTxs = txs.filter((t) => t.tx_date >= prevMonthStart && t.tx_date < monthStart)
+  const sum = (rows: Tx[], k: Kind) => rows.filter((t) => t.type === k).reduce((s, t) => s + Number(t.amount_satang || 0), 0)
+  const income = sum(currentTxs, 'income')
+  const expense = sum(currentTxs, 'expense')
+  const previousExpense = sum(previousTxs, 'expense')
+  const expenseChange = previousExpense > 0 ? Math.round(((expense - previousExpense) / previousExpense) * 100) : null
+  const categorySpending = Object.values(currentTxs.filter((t) => t.type === 'expense').reduce<Record<string, { label: string; total: number }>>((acc, t) => {
+    const key = t.categories?.name ?? 'ไม่ระบุหมวด'
+    acc[key] = { label: key, total: (acc[key]?.total ?? 0) + Number(t.amount_satang || 0) }
+    return acc
+  }, {})).sort((a, b) => b.total - a.total).slice(0, 4)
+  const maxCategorySpend = Math.max(...categorySpending.map((c) => c.total), 1)
+  const visibleTxs = currentTxs.filter((t) => txFilter === 'all' || t.type === txFilter)
   const doneCount = habits.filter((h) => isDone(h.id)).length
   const pct = habits.length ? Math.round((doneCount / habits.length) * 100) : 0
 
@@ -195,13 +209,24 @@ function Dashboard() {
         </section>
 
         <section aria-labelledby="money-h" className={`${card} space-y-4`}>
-          <h2 id="money-h" className="text-lg font-semibold">เงินของเดือนนี้ 🪙</h2>
+          <div className="flex items-start justify-between gap-3">
+            <div><h2 id="money-h" className="text-lg font-semibold">เงินของเดือนนี้ 🪙</h2><p className="text-xs text-slate-500">ยอดจริงจากรายการที่บันทึก · {monthStart} ถึง {today}</p></div>
+            <span className="shrink-0 rounded-full bg-sky-50 px-3 py-1 text-xs text-sky-700">{currentTxs.length} รายการ</span>
+          </div>
           <QuickAdd cats={cats} onSaved={load} />
-          <dl className="grid grid-cols-3 gap-2 text-center text-sm">
-            <div className="rounded-2xl bg-emerald-50 p-3"><dt className="text-emerald-800">รายรับ</dt><dd className="font-semibold text-emerald-900">{baht(income)}</dd></div>
-            <div className="rounded-2xl bg-rose-50 p-3"><dt className="text-rose-800">รายจ่าย</dt><dd className="font-semibold text-rose-900">{baht(expense)}</dd></div>
-            <div className="rounded-2xl bg-sky-50 p-3"><dt className="text-sky-800">คงเหลือ</dt><dd className="font-semibold text-sky-900">{baht(income - expense)}</dd></div>
+          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3 text-sm">
+            <div className="rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-100"><dt className="text-emerald-800">รายรับ</dt><dd className="mt-1 break-words text-xl font-semibold text-emerald-950">฿{baht(income)}</dd><p className="mt-1 text-xs text-emerald-700">เงินเข้าทั้งเดือน</p></div>
+            <div className="rounded-2xl bg-rose-50 p-4 ring-1 ring-rose-100"><dt className="text-rose-800">รายจ่าย</dt><dd className="mt-1 break-words text-xl font-semibold text-rose-950">฿{baht(expense)}</dd><p className="mt-1 text-xs text-rose-700">{expenseChange === null ? 'ยังไม่มีข้อมูลเดือนก่อน' : (expenseChange > 0 ? 'เพิ่ม' : expenseChange < 0 ? 'ลด' : 'เท่าเดิม') + ' ' + Math.abs(expenseChange) + '% จากเดือนก่อน'}</p></div>
+            <div className={'rounded-2xl p-4 ring-1 ' + (income - expense >= 0 ? 'bg-sky-50 ring-sky-100' : 'bg-amber-50 ring-amber-100')}><dt className="text-slate-700">คงเหลือสุทธิ</dt><dd className="mt-1 break-words text-xl font-semibold text-slate-950">฿{baht(income - expense)}</dd><p className="mt-1 text-xs text-slate-600">{income > 0 ? 'ใช้ไป ' + Math.round(expense / income * 100) + '% ของรายรับ' : 'เพิ่มรายการรายรับเพื่อดูสัดส่วน'}</p></div>
           </dl>
+          <div className="space-y-2 rounded-2xl bg-slate-50 p-4">
+            <div className="flex justify-between text-xs text-slate-500"><span>สัดส่วนรายรับ</span><span>สัดส่วนรายจ่าย</span></div>
+            <div className="flex h-3 overflow-hidden rounded-full bg-slate-200"><div className="bg-emerald-300 transition-all" style={{ width: (income + expense ? income / (income + expense) * 100 : 0) + '%' }} /><div className="bg-rose-300 transition-all" style={{ width: (income + expense ? expense / (income + expense) * 100 : 0) + '%' }} /></div>
+          </div>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between"><h3 className="font-semibold">หมวดที่ใช้จ่ายสูงสุด</h3><Link href="/insights" className="text-xs text-sky-700 underline underline-offset-2">ดูรายละเอียด →</Link></div>
+            {categorySpending.length === 0 ? <p className="text-sm text-slate-500">ยังไม่มีรายจ่ายเดือนนี้</p> : categorySpending.map((c) => <div key={c.label}><div className="mb-1 flex justify-between gap-3 text-sm"><span className="truncate">{c.label}</span><span className="shrink-0 font-medium">{baht(c.total)} บาท</span></div><div className="h-2 overflow-hidden rounded-full bg-sky-100"><div className="h-full rounded-full bg-sky-300 transition-all" style={{ width: (c.total / maxCategorySpend * 100) + '%' }} /></div></div>)}
+          </div>
 
           <div className="grid grid-cols-2 gap-2 rounded-2xl bg-sky-50/60 p-3">
             <select className={field} value={type} onChange={(e) => { setType(e.target.value as Kind); setCatId('') }} aria-label="ประเภท">
@@ -217,9 +242,10 @@ function Dashboard() {
             <button className={`${btn} col-span-2`} onClick={addTx}>บันทึกรายการ</button>
           </div>
 
-          {txs.length === 0 && <p className="text-sm text-slate-500">เดือนนี้ยังไม่มีรายการ</p>}
+          <div className="flex items-center justify-between gap-3"><h3 className="font-semibold">รายการเดือนนี้</h3><select className={field} value={txFilter} onChange={(e) => setTxFilter(e.target.value as 'all' | Kind)} aria-label="กรองรายการ"><option value="all">ทั้งหมด</option><option value="income">รายรับ</option><option value="expense">รายจ่าย</option></select></div>
+          {visibleTxs.length === 0 && <p className="text-sm text-slate-500">{currentTxs.length === 0 ? 'เดือนนี้ยังไม่มีรายการ' : 'ไม่มีรายการตามตัวกรองนี้'}</p>}
           <ul className="space-y-2">
-            {txs.map((t) => (
+            {visibleTxs.map((t) => (
               <li key={t.id} className="flex items-center justify-between rounded-2xl bg-white px-4 py-2 text-sm ring-1 ring-sky-100">
                 <span>
                   {t.categories?.emoji ?? '•'} {t.categories?.name ?? 'ไม่ระบุหมวด'}
