@@ -62,13 +62,13 @@ export default function Insights() {
     load()
   }, [load])
 
-  const ask = async (question: string, days: number) => {
+  const ask = async (question: string, days: number, period: 'rolling' | 'month' = 'rolling') => {
     setBusy(true)
     setAnswer('')
     const r = await fetch('/api/ai', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mode: 'ask', question, days }),
+      body: JSON.stringify({ mode: 'ask', question, days, period, today }),
     })
     const j = await r.json()
     setBusy(false)
@@ -156,7 +156,7 @@ export default function Insights() {
           <h2 className="text-lg font-semibold">ถาม AI ✨</h2>
           <div className="flex flex-wrap gap-2">
             <button className={btn} disabled={busy} onClick={() => ask('สรุปสัปดาห์นี้ให้หน่อย ทั้งกิจวัตร การใช้จ่าย และอารมณ์ พร้อมให้กำลังใจ', 7)}>สรุปสัปดาห์นี้</button>
-            <button className={btn} disabled={busy} onClick={() => ask('เดือนนี้ใช้จ่ายหมวดไหนมากสุด และมีอะไรน่าสังเกตไหม', 30)}>เช็กรายจ่ายเดือนนี้</button>
+            <button className={btn} disabled={busy} onClick={() => ask('เดือนนี้ใช้จ่ายหมวดไหนมากสุด และมีอะไรน่าสังเกตไหม', 30, 'month')}>เช็กรายจ่ายเดือนนี้</button>
           </div>
           <div className="flex gap-2">
             <input className={`${field} min-w-0 flex-1`} placeholder="ถามอะไรก็ได้ เช่น กิจวัตรไหนหลุดบ่อย" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && q.trim() && ask(q, 30)} />
