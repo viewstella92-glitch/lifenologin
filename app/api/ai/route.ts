@@ -86,12 +86,15 @@ export async function POST(req: NextRequest) {
 
     // mode "ask": answer a question using the last N days of the user's own data
     const days = Math.min(Math.max(Number(body.days) || 7, 1), 60)
-    const since = new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
+    const today = typeof body.today === 'string' && /^\\d{4}-\\d{2}-\\d{2}$/.test(body.today) ? body.today : new Date().toISOString().slice(0, 10)
+    const since = body.period === 'month'
+      ? today.slice(0, 7) + '-01'
+      : new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
     const [h, l, t, m] = await Promise.all([
       sb.from('habits').select('id,name').eq('archived', false),
-      sb.from('habit_logs').select('habit_id,log_date').gte('log_date', since),
-      sb.from('transactions').select('type,amount_satang,tx_date,note,categories(name)').gte('tx_date', since),
-      sb.from('moods').select('mood_date,score').gte('mood_date', since),
+      sb.from('habit_logs').select('habit_id,log_date').gte('log_date', since).lte('log_date', today),
+      sb.from('transactions').select('type,amount_satang,tx_date,note,categories(name)').gte('tx_date', since).lte('tx_date', today),
+      sb.from('moods').select('mood_date,score').gte('mood_date', since).lte('mood_date', today),
     ])
     if (h.error || l.error || t.error || m.error) {
       throw new Error('อ่านข้อมูลจากฐานข้อมูลไม่สำเร็จ จึงยังสรุปยอดให้ไม่ได้')
